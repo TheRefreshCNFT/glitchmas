@@ -232,8 +232,9 @@ const maxOverlap = Math.min(r1, r2) * maxOverlapRatio;
       const forceY = -shape.rotY * springStiffness;
 
       // Add Random Turbulence (Wind)
-const turbulenceX = (Math.random() - 0.5) * 0.0035;
-const turbulenceY = (Math.random() - 0.5) * 0.0035;
+const turbulenceX = (Math.random() - 0.5) * 0.0045;
+const turbulenceY = (Math.random() - 0.5) * 0.0045;
+
 
 
       shape.velX += forceX + turbulenceX;
