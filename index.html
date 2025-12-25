@@ -30,7 +30,7 @@
 
   const shapes = [];
   const numShapes = 5; 
-  const maxOverlapRatio = 0.25; 
+  const maxOverlapRatio = 0.6; 
   let globalTime = 0; 
 
   const colors = [
@@ -60,38 +60,64 @@
     return a + (b - a) * t;
   }
 
-  function initializeShapes() {
+  function getVisualRadius(shape) {
+  // Worst-case outer layer radius: progress≈0 => radius, plus (noise*20) up to 20, plus breath up to 10
+  const outer = shape.radius + 30;
+
+  // Rebuild the same transform terms used in drawShape()
+  const scale = Math.cos(shape.rotX);
+  const skew = Math.sin(shape.rotY) * 1.3;
+  const visualScale = Math.max(0.2, Math.abs(scale));
+
+  const a = 1 + shape.rotationAxis.x * skew;
+  const b = shape.rotationAxis.y * skew;
+  const c = shape.rotationAxis.x * skew;
+  const d = 1 + shape.rotationAxis.y * skew;
+
+  // This is the actual 2x2 matrix you apply via ctx.transform(...)
+  const m00 = a * visualScale;
+  const m01 = c;
+  const m10 = b;
+  const m11 = d * visualScale;
+
+  // Largest singular value (max stretch factor) of the 2x2 matrix
+  const s1 = m00*m00 + m01*m01 + m10*m10 + m11*m11;
+  const s2 = (m00*m00 + m01*m01 - m10*m10 - m11*m11);
+  const s3 = (m00*m10 + m01*m11);
+  const sigmaMax = Math.sqrt((s1 + Math.sqrt(s2*s2 + 4*s3*s3)) / 2);
+
+  return outer * sigmaMax;
+}
+
+
+
+function initializeShapes() {
     shapes.length = 0;
     const maxRadius = Math.min(canvas.width, canvas.height) / 2.5; 
 
     let attempts = 0;
     while (shapes.length < numShapes && attempts < 2000) {
       
-      // UPDATED: Greater variety in size
-      // Range is now roughly 30% to 100% of maxRadius
-      const minRadius = maxRadius * 0.3;
+      const minRadius = maxRadius * 0.4;
       const radius = Math.random() * (maxRadius - minRadius) + minRadius;
 
       // GEOMETRY
       const possibleSymmetries = [5, 6, 7, 8, 9, 12, 16, 20]; 
       const symmetry = possibleSymmetries[Math.floor(Math.random() * possibleSymmetries.length)];
       const step = Math.floor(Math.random() * (symmetry / 2 - 1)) + 2; 
-
       const patternType = Math.floor(Math.random() * 2);
 
-      // UPDATED: Generate Random Position logic to ensure spawn is fully on-screen
-      // We limit the spawn area to (width - 2*radius) so the edges don't clip
+      // Generate Random Base Position
       const safeWidth = canvas.width - (radius * 2);
       const safeHeight = canvas.height - (radius * 2);
       
-      // If screen is too small for safe placement, default to center, otherwise randomize safe area
       const randomX = safeWidth > 0 ? Math.random() * safeWidth + radius : canvas.width / 2;
       const randomY = safeHeight > 0 ? Math.random() * safeHeight + radius : canvas.height / 2;
 
       const newShape = {
         baseX: randomX,
         baseY: randomY,
-        x: randomX,
+        x: randomX, 
         y: randomY,
         
         radius,
@@ -119,15 +145,38 @@
         rotationAxis: normalizeVector({ x: Math.random() - 0.5, y: Math.random() - 0.5 })
       };
 
-      // --- RESTORED OVERLAP CHECK ---
+      // --- PRE-CALCULATE POSITION ---
+      // We calculate the drift immediately so we check overlap on the VISUAL position
+      const t = 0 + newShape.timeOffset; 
+      const walkRange = canvas.width * 0.25 * newShape.walkRangeMult;
+      const walkSpeed = t * 0.4 * newShape.walkSpeedMult;
+      
+      let calcX = newShape.baseX + (Math.sin(walkSpeed) * walkRange + Math.cos(walkSpeed * 0.3) * (walkRange * 0.3));
+      let calcY = newShape.baseY + (Math.cos(walkSpeed * 0.7) * (walkRange * 0.15));
+
+      // Apply Boundary Clamping
+      if (calcX - newShape.radius < 0) calcX = newShape.radius;
+      if (calcX + newShape.radius > canvas.width) calcX = canvas.width - newShape.radius;
+      if (calcY - newShape.radius < 0) calcY = newShape.radius;
+      if (calcY + newShape.radius > canvas.height) calcY = canvas.height - newShape.radius;
+
+      newShape.x = calcX;
+      newShape.y = calcY;
+
+      // --- VISUAL OVERLAP CHECK ---
       let valid = true;
       for (let shape of shapes) {
-        const dx = shape.baseX - newShape.baseX;
-        const dy = shape.baseY - newShape.baseY;
+        // Check distance between ACTUAL positions (x,y), not invisible anchors (baseX, baseY)
+        const dx = shape.x - newShape.x;
+        const dy = shape.y - newShape.y;
         const dist = Math.hypot(dx, dy);
-        const minDist = shape.radius + newShape.radius;
-        // Check if they overlap too much
-        const maxOverlap = Math.min(shape.radius, newShape.radius) * maxOverlapRatio;
+        
+const r1 = getVisualRadius(shape);
+const r2 = getVisualRadius(newShape);
+
+const minDist = r1 + r2;
+const maxOverlap = Math.min(r1, r2) * maxOverlapRatio;
+
         
         if (dist < (minDist - maxOverlap)) {
           valid = false;
@@ -139,10 +188,6 @@
         shapes.push(newShape);
       }
       attempts++;
-    }
-    
-    if (attempts >= 2000) {
-        console.warn("Could not place all shapes without overlapping");
     }
   }
 
@@ -202,6 +247,66 @@
       // --- 3. INTERNAL ANIMATION ---
       shape.phase += 0.002; 
     }
+
+      // --- ENFORCE MAX OVERLAP (maxOverlapRatio) ON VISUAL POSITIONS ---
+  for (let i = 0; i < shapes.length; i++) {
+    for (let j = i + 1; j < shapes.length; j++) {
+      const s1 = shapes[i];
+      const s2 = shapes[j];
+
+      const r1 = getVisualRadius(s1);
+      const r2 = getVisualRadius(s2);
+
+      const allowedOverlap = Math.min(r1, r2) * maxOverlapRatio;
+      const minDist = (r1 + r2) - allowedOverlap;
+
+      let dx = s2.x - s1.x;
+      let dy = s2.y - s1.y;
+      let dist = Math.hypot(dx, dy);
+
+      if (dist === 0) {
+        dx = (Math.random() - 0.5) * 0.001;
+        dy = (Math.random() - 0.5) * 0.001;
+        dist = Math.hypot(dx, dy);
+      }
+
+      if (dist < minDist) {
+        const push = (minDist - dist) * 0.5;
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        // Push apart (and persist by shifting baseX/baseY too)
+        s1.x -= nx * push;  s1.y -= ny * push;
+        s2.x += nx * push;  s2.y += ny * push;
+
+        s1.baseX -= nx * push;  s1.baseY -= ny * push;
+        s2.baseX += nx * push;  s2.baseY += ny * push;
+
+        // Clamp base positions using the same radius logic you already use
+        if (s1.baseX - s1.radius < 0) s1.baseX = s1.radius;
+        if (s1.baseX + s1.radius > canvas.width) s1.baseX = canvas.width - s1.radius;
+        if (s1.baseY - s1.radius < 0) s1.baseY = s1.radius;
+        if (s1.baseY + s1.radius > canvas.height) s1.baseY = canvas.height - s1.radius;
+
+        if (s2.baseX - s2.radius < 0) s2.baseX = s2.radius;
+        if (s2.baseX + s2.radius > canvas.width) s2.baseX = canvas.width - s2.radius;
+        if (s2.baseY - s2.radius < 0) s2.baseY = s2.radius;
+        if (s2.baseY + s2.radius > canvas.height) s2.baseY = canvas.height - s2.radius;
+
+        // Clamp the current draw positions too
+        if (s1.x - s1.radius < 0) s1.x = s1.radius;
+        if (s1.x + s1.radius > canvas.width) s1.x = canvas.width - s1.radius;
+        if (s1.y - s1.radius < 0) s1.y = s1.radius;
+        if (s1.y + s1.radius > canvas.height) s1.y = canvas.height - s1.radius;
+
+        if (s2.x - s2.radius < 0) s2.x = s2.radius;
+        if (s2.x + s2.radius > canvas.width) s2.x = canvas.width - s2.radius;
+        if (s2.y - s2.radius < 0) s2.y = s2.radius;
+        if (s2.y + s2.radius > canvas.height) s2.y = canvas.height - s2.radius;
+      }
+    }
+  }
+
   }
 
   function drawShape(shape) {
@@ -212,7 +317,7 @@
 
     // --- 3D TRANSFORM ---
     const scale = Math.cos(rotX); 
-    const skew = Math.sin(rotY) * 1.2; 
+    const skew = Math.sin(rotY) * 1.3; 
     const visualScale = Math.max(0.2, Math.abs(scale)); 
     
     const a = 1 + rotationAxis.x * skew;
@@ -279,7 +384,7 @@
 
         // --- CONNECTING THE DOTS ---
         
-        if (patternType === 1) {
+        if (patternType === 0) {
             for (let j = 0; j < points.length; j++) {
                 const p1 = points[j];
                 const p2 = points[(j + 2) % points.length]; 
@@ -300,7 +405,7 @@
     
     // Core Glow
     ctx.fillStyle = color;
-    ctx.globalAlpha = 0.075;
+    ctx.globalAlpha = 0.07;
     ctx.beginPath();
     ctx.arc(0, 0, radius * 0.25, 0, Math.PI * 2);
     ctx.fill();
@@ -409,7 +514,7 @@
     offscreenCtx.drawImage(canvas, offsetX, offsetY, scaledWidth, scaledHeight);
 
     const link = document.createElement('a');
-    link.download = `Gitchmas_${multiplier}k_${transparent ? 'TP' : 'BLK'}.png`;
+    link.download = `MerryGlitchmas_${multiplier}k.png`;
     link.href = offscreenCanvas.toDataURL('image/png');
     link.click();
 }
