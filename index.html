@@ -300,9 +300,9 @@
     
     // Core Glow
     ctx.fillStyle = color;
-    ctx.globalAlpha = 0.1;
+    ctx.globalAlpha = 0.075;
     ctx.beginPath();
-    ctx.arc(0, 0, radius * 0.15, 0, Math.PI * 2);
+    ctx.arc(0, 0, radius * 0.25, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();
@@ -328,22 +328,40 @@
     initializeShapes();
   });
 
-    //onclick refresh event
-    let timer;
-    document.getElementById("patternCanvas").addEventListener('click', event => {
-      if (event.detail === 1) {
-      timer = setTimeout(() => {
-        location.reload();
-      }, 200)
-      }
+// --- UPDATED CLICK/DOUBLE-CLICK LOGIC ---
+    let tapTimer;
+    let lastTapTime = 0;
+    
+    // We handle both single and double clicks in one listener
+    // This fixes the race condition on iPadOS
+    document.getElementById("patternCanvas").addEventListener('click', (e) => {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTapTime;
+
+        // Clear any pending reload from the previous tap
+        clearTimeout(tapTimer);
+
+        if (tapLength < 275 && tapLength > 0) {
+            // --- DOUBLE CLICK DETECTED ---
+            // (User tapped twice within 500ms)
+            showModal();
+            
+            // Prevent the third click if the user is mashing buttons
+            e.preventDefault(); 
+        } else {
+            // --- SINGLE CLICK DETECTED ---
+            // Wait 300ms to see if a second tap comes. 
+            // If not, reload.
+            tapTimer = setTimeout(() => {
+                location.reload();
+            }, 300);
+        }
+
+        lastTapTime = currentTime;
     });
-    document.getElementById("patternCanvas").addEventListener('dblclick', event => {
-      clearTimeout(timer);
-      showModal();
-    })
 
  function showModal() {
-             const options = ['1k', '1kt', '2k', '2kt', '3k', '3kt', '4k', '4kt', '8k', '8kt', '16k', '16kt'];
+             const options = ['1k', '2k', '3k', '4k', '8k', '16k'];
              const modal = document.createElement('div');
              modal.className = 'modal';
              if (modal) {
@@ -369,7 +387,7 @@
 
          function scaleCanvas(multiplier, transparent) {
     const originalAspectRatio = canvas.width / canvas.height;
-    const upscaleHeight = 512 * multiplier;
+    const upscaleHeight = 1024 * multiplier;
     const upscaleWidth = upscaleHeight * originalAspectRatio;
 
     const offscreenCanvas = document.createElement('canvas');
@@ -391,7 +409,7 @@
     offscreenCtx.drawImage(canvas, offsetX, offsetY, scaledWidth, scaledHeight);
 
     const link = document.createElement('a');
-    link.download = `glitchin_${multiplier}k_${transparent ? 'TP' : 'BLK'}.png`;
+    link.download = `Gitchmas_${multiplier}k_${transparent ? 'TP' : 'BLK'}.png`;
     link.href = offscreenCanvas.toDataURL('image/png');
     link.click();
 }
