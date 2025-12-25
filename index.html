@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { margin: 0; overflow: hidden; background-color: black; }
+    canvas { display: block; touch-action: none; }
+    .modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #111; padding: 20px; border-radius: 10px; border: 1px solid #333;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.2); z-index: 10;
+}
+.modal button {
+    padding: 10px; background: #000; color: gold; border: 1px solid #333;
+    font-weight: bold; cursor: pointer; box-shadow: 0 0 5px rgba(255, 215, 0, 0.2);
+    font-family: monospace;
+}
+.modal button:hover { background: #222; }
+  </style>
+</head>
+<body>
+<canvas id="patternCanvas"></canvas>
+<script>
+  const canvas = document.getElementById("patternCanvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const shapes = [];
+  const numShapes = 5; 
+  const maxOverlapRatio = 0.25; 
+  let globalTime = 0; 
+
+  const colors = [
+    "hsl(180, 100%, 70%)", "hsl(200, 100%, 70%)", "hsl(220, 100%, 80%)",
+    "hsl(280, 100%, 75%)", "hsl(320, 100%, 70%)", "hsl(0, 0%, 90%)",
+    "hsl(150, 100%, 80%)", "hsl(250, 100%, 85%)" 
+  ];
+
+  function normalizeVector(vec) {
+    const mag = Math.hypot(vec.x, vec.y);
+    return { x: vec.x / mag, y: vec.y / mag };
+  }
+
+  // --- Noise Functions ---
+  const noiseSeed = new Float32Array(512);
+  for (let i = 0; i < 512; i++) noiseSeed[i] = Math.random();
+
+  function noise(x) {
+    const scaledX = Math.abs(x); 
+    const i = Math.floor(scaledX) % 512;
+    const f = scaledX - Math.floor(scaledX);
+    const u = f * f * (3 - 2 * f); 
+    return lerp(noiseSeed[i], noiseSeed[(i + 1) % 512], u);
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function initializeShapes() {
+    shapes.length = 0;
+    const maxRadius = Math.min(canvas.width, canvas.height) / 2.5; 
+
+    let attempts = 0;
+    while (shapes.length < numShapes && attempts < 2000) {
+      
+      // UPDATED: Greater variety in size
+      // Range is now roughly 30% to 100% of maxRadius
+      const minRadius = maxRadius * 0.3;
+      const radius = Math.random() * (maxRadius - minRadius) + minRadius;
+
+      // GEOMETRY
+      const possibleSymmetries = [5, 6, 7, 8, 9, 12, 16]; 
+      const symmetry = possibleSymmetries[Math.floor(Math.random() * possibleSymmetries.length)];
+      const step = Math.floor(Math.random() * (symmetry / 2 - 1)) + 2; 
+
+      const patternType = Math.floor(Math.random() * 3);
+
+      // UPDATED: Generate Random Position logic to ensure spawn is fully on-screen
+      // We limit the spawn area to (width - 2*radius) so the edges don't clip
+      const safeWidth = canvas.width - (radius * 2);
+      const safeHeight = canvas.height - (radius * 2);
+      
+      // If screen is too small for safe placement, default to center, otherwise randomize safe area
+      const randomX = safeWidth > 0 ? Math.random() * safeWidth + radius : canvas.width / 2;
+      const randomY = safeHeight > 0 ? Math.random() * safeHeight + radius : canvas.height / 2;
+
+      const newShape = {
+        baseX: randomX,
+        baseY: randomY,
+        x: randomX,
+        y: randomY,
+        
+        radius,
+        symmetry,
+        step,
+        patternType, 
+        spikeFactor: Math.random() * 0.5 + 0.5, 
+        twistFactor: (Math.random() - 0.5) * 0.1, 
+
+        phase: Math.random() * Math.PI * 2,
+        lineDensity: Math.floor(Math.random() * 25) + 25,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        
+        // MOVEMENT RANDOMIZERS
+        timeOffset: Math.random() * 1000, 
+        walkSpeedMult: Math.random() * 0.5 + 0.5, 
+        walkRangeMult: Math.random() * 0.5 + 0.75, 
+        
+        // PHYSICS
+        rotX: (Math.random() - 0.5) * 0.5,
+        rotY: (Math.random() - 0.5) * 0.5, 
+        velX: 0, 
+        velY: 0,
+        
+        rotationAxis: normalizeVector({ x: Math.random() - 0.5, y: Math.random() - 0.5 })
+      };
+
+      // --- RESTORED OVERLAP CHECK ---
+      let valid = true;
+      for (let shape of shapes) {
+        const dx = shape.baseX - newShape.baseX;
+        const dy = shape.baseY - newShape.baseY;
+        const dist = Math.hypot(dx, dy);
+        const minDist = shape.radius + newShape.radius;
+        // Check if they overlap too much
+        const maxOverlap = Math.min(shape.radius, newShape.radius) * maxOverlapRatio;
+        
+        if (dist < (minDist - maxOverlap)) {
+          valid = false;
+          break;
+        }
+      }
+
+      if (valid) {
+        shapes.push(newShape);
+      }
+      attempts++;
+    }
+    
+    if (attempts >= 2000) {
+        console.warn("Could not place all shapes without overlapping");
+    }
+  }
+
+
+  function updateShapes() {
+    for (let shape of shapes) {
+      
+      // --- 1. RANDOMIZED WALKING ---
+      const t = globalTime + shape.timeOffset;
+      
+      const walkRange = canvas.width * 0.25 * shape.walkRangeMult;
+      const walkSpeed = t * 0.4 * shape.walkSpeedMult;
+      
+      const driftX = Math.sin(walkSpeed) * walkRange + Math.cos(walkSpeed * 0.3) * (walkRange * 0.3);
+      const driftY = Math.cos(walkSpeed * 0.7) * (walkRange * 0.15); 
+
+      let newX = shape.baseX + driftX;
+      let newY = shape.baseY + driftY;
+
+      // UPDATED: Boundary Clamping
+      // This forces the shape to stay within the visible canvas
+      if (newX - shape.radius < 0) newX = shape.radius;
+      if (newX + shape.radius > canvas.width) newX = canvas.width - shape.radius;
+      if (newY - shape.radius < 0) newY = shape.radius;
+      if (newY + shape.radius > canvas.height) newY = canvas.height - shape.radius;
+
+      shape.x = newX;
+      shape.y = newY;
+
+      // --- 2. ROTATION PHYSICS (The 65% Rule) ---
+      const stateVal = noise(t * 0.1); 
+      
+      let springStiffness = 0;
+      
+      if (stateVal > 0.35) {
+        springStiffness = 0.002; // Magnetic Pull
+      } else {
+        springStiffness = 0.0001; // Free Float
+      }
+
+      const forceX = -shape.rotX * springStiffness;
+      const forceY = -shape.rotY * springStiffness;
+
+      // Add Random Turbulence (Wind)
+      const turbulenceX = (Math.random() - 0.5) * 0.002;
+      const turbulenceY = (Math.random() - 0.5) * 0.002;
+
+      shape.velX += forceX + turbulenceX;
+      shape.velY += forceY + turbulenceY;
+
+      shape.velX *= 0.96;
+      shape.velY *= 0.96;
+
+      shape.rotX += shape.velX;
+      shape.rotY += shape.velY;
+
+      // --- 3. INTERNAL ANIMATION ---
+      shape.phase += 0.002; 
+    }
+  }
+
+  function drawShape(shape) {
+    const { x, y, radius, symmetry, step, patternType, spikeFactor, twistFactor, phase, lineDensity, color, rotX, rotY, rotationAxis } = shape;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // --- 3D TRANSFORM ---
+    const scale = Math.cos(rotX); 
+    const skew = Math.sin(rotY) * 1.2; 
+    const visualScale = Math.max(0.2, Math.abs(scale)); 
+    
+    const a = 1 + rotationAxis.x * skew;
+    const b = rotationAxis.y * skew;
+    const c = rotationAxis.x * skew;
+    const d = 1 + rotationAxis.y * skew;
+    
+    ctx.transform(a * visualScale, b, c, d * visualScale, 0, 0);
+
+    // --- DRAWING ---
+    ctx.lineWidth = 1.25; 
+    
+    for (let i = 0; i < lineDensity; i++) {
+        const progress = i / lineDensity;
+        
+        // Organic flowing radius
+        const layerNoise = noise(i * 0.15 + (globalTime + shape.timeOffset) * 0.1); 
+        const breath = Math.sin((globalTime + shape.timeOffset) * 0.5 + i * 0.05) * 10;
+        
+        const currentRadius = radius * (1 - progress * 0.85) + (layerNoise * 20) + breath;
+
+        // Alpha calculation
+        const alpha = (1 - progress) * 0.8 + 0.15;
+        const shade = Math.floor(180 + layerNoise * 75);
+        ctx.strokeStyle = `rgba(${shade}, ${shade}, ${shade}, ${alpha})`;
+
+        ctx.beginPath();
+        const points = [];
+
+        // --- PATTERN ALGORITHMS ---
+        
+        if (patternType === 0) { 
+            // TYPE 0: THE WEAVER
+            for (let j = 0; j < symmetry; j++) {
+                const angle = (Math.PI * 2 / symmetry) * j + phase + (i * 0.015); 
+                points.push({
+                    x: Math.cos(angle) * currentRadius,
+                    y: Math.sin(angle) * currentRadius
+                });
+            }
+        } 
+        else if (patternType === 1) { 
+            // TYPE 1: THE STARBURST
+            for (let j = 0; j < symmetry * 2; j++) {
+                const angle = (Math.PI * 2 / (symmetry * 2)) * j + phase + (i * 0.015);
+                const r = (j % 2 === 0) ? currentRadius : currentRadius * spikeFactor;
+                points.push({
+                    x: Math.cos(angle) * r,
+                    y: Math.sin(angle) * r
+                });
+            }
+        } 
+        else if (patternType === 2) { 
+            // TYPE 2: THE TURBINE
+            for (let j = 0; j < symmetry; j++) {
+                const twist = i * twistFactor; 
+                const angle = (Math.PI * 2 / symmetry) * j + phase + twist;
+                points.push({
+                    x: Math.cos(angle) * currentRadius,
+                    y: Math.sin(angle) * currentRadius
+                });
+            }
+        }
+
+        // --- CONNECTING THE DOTS ---
+        
+        if (patternType === 1) {
+            for (let j = 0; j < points.length; j++) {
+                const p1 = points[j];
+                const p2 = points[(j + 2) % points.length]; 
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+            }
+        } else {
+            for (let j = 0; j < points.length; j++) {
+                const p1 = points[j];
+                const p2 = points[(j + step) % points.length]; 
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+            }
+        }
+        
+        ctx.stroke();
+    }
+    
+    // Core Glow
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.1;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+
+  function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    updateShapes();
+    for (let shape of shapes) {
+      drawShape(shape);
+    }
+    globalTime += 0.005; 
+    requestAnimationFrame(animate);
+  }
+
+  initializeShapes();
+  animate();
+
+  window.addEventListener("resize", () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    initializeShapes();
+  });
+
+  let timer;
+        canvas.addEventListener("click", e => e.detail === 1 && (timer = setTimeout(() => location.reload(), 275)));
+
+        canvas.addEventListener("dblclick", () => {
+          clearTimeout(timer);
+            showModal();
+        });
+
+ function showModal() {
+             const options = ['1k', '1kt', '2k', '2kt', '3k', '3kt', '4k', '4kt', '8k', '8kt', '16k', '16kt'];
+             const modal = document.createElement('div');
+             modal.className = 'modal';
+             if (modal) {
+               modal.style.background = "#000";
+               modal.style.boxShadow = `0 0 10px hsl(310, 100%, 50%)`;
+             }
+             options.forEach(opt => {
+                 const btn = document.createElement('button');
+                 btn.textContent = opt;
+                 btn.onclick = () => {
+                     document.body.removeChild(modal);
+                     scaleCanvas(parseInt(opt), opt.includes('t'));
+                 };
+                 modal.appendChild(btn);
+                 if (btn) {
+                   btn.style.background = "#000";
+                   btn.style.color = 'hsl(310, 100%, 50%)';
+                   btn.style.boxShadow = `0 0 10px hsl(310, 100%, 50%)`;
+                 }
+               });
+             document.body.appendChild(modal);
+         }
+
+         function scaleCanvas(multiplier, transparent) {
+    const originalAspectRatio = canvas.width / canvas.height;
+    const upscaleHeight = 512 * multiplier;
+    const upscaleWidth = upscaleHeight * originalAspectRatio;
+
+    const offscreenCanvas = document.createElement('canvas');
+    const offscreenCtx = offscreenCanvas.getContext('2d');
+    offscreenCanvas.width = upscaleWidth;
+    offscreenCanvas.height = upscaleHeight;
+
+    if (!transparent) {
+        offscreenCtx.fillStyle = '#000000';
+        offscreenCtx.fillRect(0, 0, upscaleWidth, upscaleHeight);
+    }
+
+    const scale = upscaleHeight / canvas.height;
+    const scaledWidth = canvas.width * scale;
+    const scaledHeight = canvas.height * scale;
+    const offsetX = (upscaleWidth - scaledWidth) / 2;
+    const offsetY = (upscaleHeight - scaledHeight) / 2;
+
+    offscreenCtx.drawImage(canvas, offsetX, offsetY, scaledWidth, scaledHeight);
+
+    const link = document.createElement('a');
+    link.download = `glitchin_${multiplier}k_${transparent ? 'TP' : 'BLK'}.png`;
+    link.href = offscreenCanvas.toDataURL('image/png');
+    link.click();
+}
+</script>
+</body>
+</html>
