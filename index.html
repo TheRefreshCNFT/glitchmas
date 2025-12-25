@@ -73,11 +73,11 @@
       const radius = Math.random() * (maxRadius - minRadius) + minRadius;
 
       // GEOMETRY
-      const possibleSymmetries = [5, 6, 7, 8, 9, 12, 16]; 
+      const possibleSymmetries = [5, 6, 7, 8, 9, 12, 16, 20]; 
       const symmetry = possibleSymmetries[Math.floor(Math.random() * possibleSymmetries.length)];
       const step = Math.floor(Math.random() * (symmetry / 2 - 1)) + 2; 
 
-      const patternType = Math.floor(Math.random() * 3);
+      const patternType = Math.floor(Math.random() * 2);
 
       // UPDATED: Generate Random Position logic to ensure spawn is fully on-screen
       // We limit the spawn area to (width - 2*radius) so the edges don't clip
@@ -328,13 +328,9 @@
     initializeShapes();
   });
 
-  let timer;
-        canvas.addEventListener("click", e => e.detail === 1 && (timer = setTimeout(() => location.reload(), 275)));
-
-        canvas.addEventListener("dblclick", () => {
-          clearTimeout(timer);
-            showModal();
-        });
+  let clickTimer;
+        canvas.addEventListener('click',  e => { if (e.detail===1) clickTimer = setTimeout(location.reload(),275) });
+        canvas.addEventListener('dblclick', e => { clearTimeout(clickTimer); showModal() });
 
  function showModal() {
              const options = ['1k', '1kt', '2k', '2kt', '3k', '3kt', '4k', '4kt', '8k', '8kt', '16k', '16kt'];
