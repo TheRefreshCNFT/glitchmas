@@ -328,9 +328,19 @@
     initializeShapes();
   });
 
-  let clickTimer;
-        canvas.addEventListener('click',  e => { if (e.detail===1) clickTimer = setTimeout(location.reload(),275) });
-        canvas.addEventListener('dblclick', e => { clearTimeout(clickTimer); showModal() });
+    //onclick refresh event
+    let timer;
+    document.getElementById("patternCanvas").addEventListener('click', event => {
+      if (event.detail === 1) {
+      timer = setTimeout(() => {
+        location.reload();
+      }, 200)
+      }
+    });
+    document.getElementById("patternCanvas").addEventListener('dblclick', event => {
+      clearTimeout(timer);
+      showModal();
+    })
 
  function showModal() {
              const options = ['1k', '1kt', '2k', '2kt', '3k', '3kt', '4k', '4kt', '8k', '8kt', '16k', '16kt'];
