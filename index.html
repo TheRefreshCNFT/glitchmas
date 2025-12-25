@@ -98,7 +98,7 @@ function initializeShapes() {
     let attempts = 0;
     while (shapes.length < numShapes && attempts < 2000) {
       
-      const minRadius = maxRadius * 0.4;
+      const minRadius = maxRadius * 0.3;
       const radius = Math.random() * (maxRadius - minRadius) + minRadius;
 
       // GEOMETRY
@@ -232,14 +232,15 @@ const maxOverlap = Math.min(r1, r2) * maxOverlapRatio;
       const forceY = -shape.rotY * springStiffness;
 
       // Add Random Turbulence (Wind)
-      const turbulenceX = (Math.random() - 0.5) * 0.002;
-      const turbulenceY = (Math.random() - 0.5) * 0.002;
+const turbulenceX = (Math.random() - 0.5) * 0.0035;
+const turbulenceY = (Math.random() - 0.5) * 0.0035;
+
 
       shape.velX += forceX + turbulenceX;
       shape.velY += forceY + turbulenceY;
 
-      shape.velX *= 0.96;
-      shape.velY *= 0.96;
+shape.velX *= 0.94;
+shape.velY *= 0.94;
 
       shape.rotX += shape.velX;
       shape.rotY += shape.velY;
